@@ -35,7 +35,7 @@ struct Cache {
 #[derive(Debug, Clone)]
 struct Block {
     valid: bool,
-    tag: u32,
+    tag: u64,
     last_used: u32,
 }
 
@@ -53,45 +53,54 @@ impl Cache {
         }
     }
 
-    fn access(&mut self, address: u32) {
+    fn access(&mut self, address: u64, is_modify: bool) {
         let (set_index, tag) = self.extract_tag_and_set_index(address);
         let set = &mut self.sets[set_index as usize];
+        let mut hit_count = 0;
         for block in set.blocks.iter_mut() {
             if block.valid && block.tag == tag {
                 // hit
-                self.hits += 1;
+                hit_count += 1;
                 block.last_used = self.hits;
-                return;
             }
         }
-        // miss
-        self.misses += 1;
-        let (_eviction_index, eviction_block) = match set
-            .blocks
-            .iter_mut()
-            .enumerate()
-            .find(|(_, block)| !block.valid)
-        {
-            Some((index, block)) => (index, block),
-            None => {
-                let (index, block) = set
-                    .blocks
-                    .iter_mut()
-                    .enumerate()
-                    .min_by_key(|(_, block)| block.last_used)
-                    .unwrap();
-                (index, block)
+        if hit_count == 0{
+            //miss
+            self.misses += 1;
+            let (_eviction_index, eviction_block) = match set
+                .blocks
+                .iter_mut()
+                .enumerate()
+                .find(|(_,block)|!block.valid)
+            {
+                Some((index,block)) => (index, block),
+                None => {
+                    let (index, block)=set
+                        .blocks
+                        .iter_mut()
+                        .enumerate()
+                        .min_by_key(|(_,block)|block.last_used)
+                        .unwrap();
+                    (index, block)
+                }
+            };
+            if eviction_block.valid {
+                self.evictions +=1;
             }
-        };
-        if eviction_block.valid {
-            self.evictions += 1;
+            eviction_block.valid = true;
+            eviction_block.tag = tag;
+            eviction_block.last_used = self.hits;
+        } else if hit_count == 2 && is_modify {
+            //modify
+            self.hits += 1;
+        } else {
+            // hit
+            self.hits += 1;
         }
-        eviction_block.valid = true;
-        eviction_block.tag = tag;
-        eviction_block.last_used = self.hits;
+
     }
 
-    fn extract_tag_and_set_index(&self, address: u32) -> (u32, u32) {
+    fn extract_tag_and_set_index(&self, address: u64) -> (u64, u64) {
         let mask = (1 << self.s) - 1;
         let set_index = (address >> self.b) & mask;
         let tag = address >> (self.s + self.b);
@@ -151,16 +160,26 @@ fn main() {
     if let Ok(lines) = read_lines(trace_file) {
         for line in lines {
             if let Ok(ip) = line {
-                let tokens: Vec<&str> = ip.split_whitespace().collect();
+                let tokens: Vec<&str> = ip.split_whitespace().flat_map(|x| x.split(',')).collect();
                 if tokens.len() != 3 {
                     eprintln!("Invalid input format");
                     process::exit(1);
                 }
                 let access_type = tokens[0];
-                let address = u32::from_str_radix(tokens[1].trim_start_matches("0x"), 16).unwrap();
+                let address = u64::from_str_radix(tokens[1].trim_start_matches("0x"), 16).unwrap();
                 match access_type {
                     "I" => continue,
-                    "L" | "S" => cache.access(address),
+                    "L" =>{
+                        cache.access(address,false);
+                    },
+                    "S" =>{
+                        cache.access(address,false);
+                    } ,
+                    "M" => {
+                        // data modify - treated as a load followed by a store to the same address
+                        cache.access(address,true);
+                        cache.access(address,true);
+                    },
                     _ => {
                         eprintln!("Invalid access type");
                         process::exit(1);
