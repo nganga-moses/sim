@@ -3,6 +3,7 @@ use std::fs::File;
 use std::io::{self, BufRead};
 use std::path::Path;
 use std::process;
+use getopts::Options;
 
 #[derive(Debug)]
 struct Set {
@@ -108,18 +109,46 @@ fn read_lines<P>(filename: P) -> io::Result<io::Lines<io::BufReader<File>>>
 
 fn main() {
     let args: Vec<String> = env::args().collect();
+    let mut s = 0;
+    let mut b = 0;
+    let mut e = 0;
+    let mut trace_file = String::new();
+
     if args.len() < 4 {
         eprintln!("Usage: cargo run <trace_file> <s> <e> <b>");
         process::exit(1);
     }
-    let file_path = &args[1];
-    let s = args[2].parse().unwrap();
-    let e = args[3].parse().unwrap();
-    let b = args[4].parse().unwrap();
+    let mut opts = Options::new();
+
+    opts.optopt("s", "", "Number of set index bits", "S");
+    opts.optopt("E", "", "Number of lines per set", "E");
+    opts.optopt("b", "", "Number of block offset bits", "B");
+    opts.optopt("t", "", "Name of valgrind trace file", "FILE");
+
+    let matches = match opts.parse(&args[1..]) {
+        Ok(m) => m,
+        Err(f) => {
+            panic!("{}",f.to_string());
+        }
+    };
+
+    if let Some(s_val) = matches.opt_str("s") {
+        s = s_val.parse::<u32>().unwrap();
+    }
+    if let Some(b_val) = matches.opt_str("b") {
+        b = b_val.parse::<u32>().unwrap();
+    }
+    if let Some(e_val) = matches.opt_str("E") {
+        e = e_val.parse::<u32>().unwrap();
+    }
+    if let Some(trace_val) = matches.opt_str("t") {
+        trace_file = trace_val;
+    }
+
 
     let mut cache = Cache::new(b, s, e);
 
-    if let Ok(lines) = read_lines(file_path) {
+    if let Ok(lines) = read_lines(trace_file) {
         for line in lines {
             if let Ok(ip) = line {
                 let tokens: Vec<&str> = ip.split_whitespace().collect();
@@ -143,7 +172,6 @@ fn main() {
         eprintln!("Failed to read file");
         process::exit(1);
     }
-    println!("hits:{}", cache.hits);
-    println!("misses:{}", cache.misses);
-    println!("evictions:{}", cache.evictions);
+    println!("hits:{} misses:{} evictions:{}", cache.hits,cache.misses, cache.evictions);
+
 }
